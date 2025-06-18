@@ -1,0 +1,4 @@
+% view.layout = 'spa';
+% stash.title = 'New Spa Device';
+<h2>New Spa Device</h2>
+%= await ctx.include({view: 'spa-devices/_form'}, {caption: 'Create', target: 'store_spa_device'})

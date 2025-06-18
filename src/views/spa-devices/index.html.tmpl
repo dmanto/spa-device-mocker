@@ -1,0 +1,15 @@
+% view.layout = 'spa-devices';
+% stash.title = 'SPA Devices';
+% for (const device of devices) {
+    <h2>
+        <%= await tags.linkTo(['show_device', {values: {mac: device.mac}}], {class: 'device-title'}, `Spa Device ${device.mac}`) %>
+    </h2>
+    <ul>
+        <li><strong>MAC:</strong> <%= device.mac %></li>
+        <li><strong>Area:</strong> <%= device.area %></li>
+        <li><strong>RSSI:</strong> <%= device.rssi %></li>
+        <li><strong>Connection State:</strong> <%= device.state.connectionState %></li>
+        <li><strong>Mode:</strong> <%= device.state.mode %></li>
+    </ul>
+% }
+<%= await tags.linkTo('create_device', {class: 'device-action'}, 'New device') %>

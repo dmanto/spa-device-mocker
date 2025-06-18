@@ -1,0 +1,18 @@
+<%# spa-devices/_form.html.tmpl %>
+<%# Assumes `device` object, `caption`, and `target` are available in the template context %>
+<{formBlock}>
+    <label for="mac">MAC Address</label>
+    <br>
+    %= await tags.textField('mac', {value: device.mac, required: true});
+    <br>
+    <label for="area">Area</label>
+    <br>
+    %= await tags.textField('area', {value: device.area || ''});
+    <br>
+    <label for="rssi">RSSI</label>
+    <br>
+    %= await tags.numberField('rssi', {value: device.rssi ?? -70, step: 1});
+    <br>
+    %= await tags.submitButton(caption)
+<{/formBlock}>
+%= await tags.formFor(target, {class: 'device-form'}, await formBlock())
