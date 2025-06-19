@@ -42,6 +42,9 @@ export interface ServiceMetadata {
     uuid: UUID;
     characteristics: CharacteristicMetadata[];
 }
+export interface MtuChangedListener {
+    (mtu: number): void;
+}
 type StateChangeListener = (state: State) => void;
 type Subscription = {
     remove: () => void;
@@ -76,6 +79,24 @@ export declare class MockBleManager {
     private connectionDelays;
     private connectionErrors;
     private disconnectionErrors;
+    private mtuListeners;
+    private deviceMaxMTUs;
+    /**
+     * Set the maximum MTU a device can support
+     */
+    setDeviceMaxMTU(deviceId: DeviceId, maxMTU: number): void;
+    /**
+     * Request MTU change during connection
+     */
+    requestMTUForDevice(deviceIdentifier: DeviceId, mtu: number): Promise<MockDevice>;
+    /**
+     * Listen for MTU changes
+     */
+    onMTUChanged(deviceIdentifier: DeviceId, listener: MtuChangedListener): Subscription;
+    /**
+     * Notify MTU listeners
+     */
+    private notifyMTUChange;
     private deviceServicesMetadata;
     private discoveredServices;
     /**

@@ -57,6 +57,9 @@ export interface ServiceMetadata {
     uuid: UUID;
     characteristics: CharacteristicMetadata[];
 }
+export interface MtuChangedListener {
+    (mtu: number): void;
+}
 
 type StateChangeListener = (state: State) => void;
 type Subscription = { remove: () => void };
@@ -100,6 +103,87 @@ export class MockBleManager {
     private connectionDelays: Map<DeviceId, number> = new Map();
     private connectionErrors: Map<DeviceId, Error> = new Map();
     private disconnectionErrors: Map<DeviceId, Error> = new Map();
+
+    // MTU management
+    private mtuListeners: Map<DeviceId, MtuChangedListener[]> = new Map();
+    private deviceMaxMTUs: Map<DeviceId, number> = new Map();
+
+    // ======================
+    // MTU Negotiation
+    // ======================
+    
+    /**
+     * Set the maximum MTU a device can support
+     */
+    setDeviceMaxMTU(deviceId: DeviceId, maxMTU: number) {
+        this.deviceMaxMTUs.set(deviceId, maxMTU);
+    }
+
+    /**
+     * Request MTU change during connection
+     */
+    async requestMTUForDevice(
+        deviceIdentifier: DeviceId,
+        mtu: number
+    ): Promise<MockDevice> {
+        // Ensure device is connected
+        if (!this.isDeviceConnected(deviceIdentifier)) {
+            throw new Error('Device not connected');
+        }
+
+        const device = this.discoveredDevices.get(deviceIdentifier);
+        if (!device) {
+            throw new Error('Device not found');
+        }
+
+        // Get device's maximum supported MTU
+        const maxMTU = this.deviceMaxMTUs.get(deviceIdentifier) || 512;
+        
+        // Determine actual MTU (minimum of requested and max supported)
+        const actualMTU = Math.min(mtu, maxMTU);
+        
+        // Update device MTU
+        device.mtu = actualMTU;
+        
+        // Notify MTU listeners
+        this.notifyMTUChange(deviceIdentifier, actualMTU);
+        
+        return device;
+    }
+
+    /**
+     * Listen for MTU changes
+     */
+    onMTUChanged(
+        deviceIdentifier: DeviceId,
+        listener: MtuChangedListener
+    ): Subscription {
+        if (!this.mtuListeners.has(deviceIdentifier)) {
+            this.mtuListeners.set(deviceIdentifier, []);
+        }
+        
+        const listeners = this.mtuListeners.get(deviceIdentifier)!;
+        listeners.push(listener);
+        
+        return {
+            remove: () => {
+                const updatedListeners = listeners.filter(l => l !== listener);
+                if (updatedListeners.length === 0) {
+                    this.mtuListeners.delete(deviceIdentifier);
+                } else {
+                    this.mtuListeners.set(deviceIdentifier, updatedListeners);
+                }
+            }
+        };
+    }
+
+    /**
+     * Notify MTU listeners
+     */
+    private notifyMTUChange(deviceId: DeviceId, mtu: number) {
+        const listeners = this.mtuListeners.get(deviceId) || [];
+        listeners.forEach(listener => listener(mtu));
+    }
 
     // Service discovery
     private deviceServicesMetadata: Map<DeviceId, ServiceMetadata[]> = new Map();
@@ -267,7 +351,17 @@ export class MockBleManager {
 
         // Update MTU if requested
         if (options?.requestMTU) {
-            device.mtu = options.requestMTU;
+            // Get device's maximum supported MTU
+            const maxMTU = this.deviceMaxMTUs.get(deviceIdentifier) || 512;
+            
+            // Determine actual MTU (minimum of requested and max supported)
+            const actualMTU = Math.min(options.requestMTU, maxMTU);
+            
+            // Update device MTU
+            device.mtu = actualMTU;
+            
+            // Notify MTU listeners
+            this.notifyMTUChange(deviceIdentifier, actualMTU);
         }
 
         // Mark device as connected
@@ -350,7 +444,7 @@ export class MockBleManager {
 
             // Clear discovered services
             this.discoveredServices.delete(deviceIdentifier);
-            
+
             const device = this.discoveredDevices.get(deviceIdentifier);
             this.notifyConnectionListeners(
                 deviceIdentifier,
