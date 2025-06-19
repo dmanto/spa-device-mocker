@@ -27,6 +27,21 @@ export interface Characteristic {
     isNotifiable: boolean;
     isIndicatable: boolean;
 }
+export interface Service {
+    uuid: UUID;
+    deviceID: DeviceId;
+}
+export interface CharacteristicMetadata {
+    uuid: UUID;
+    isReadable?: boolean;
+    isWritableWithResponse?: boolean;
+    isWritableWithoutResponse?: boolean;
+    isNotifiable?: boolean;
+}
+export interface ServiceMetadata {
+    uuid: UUID;
+    characteristics: CharacteristicMetadata[];
+}
 type StateChangeListener = (state: State) => void;
 type Subscription = {
     remove: () => void;
@@ -61,6 +76,24 @@ export declare class MockBleManager {
     private connectionDelays;
     private connectionErrors;
     private disconnectionErrors;
+    private deviceServicesMetadata;
+    private discoveredServices;
+    /**
+     * Set services and characteristics metadata for a device
+     */
+    setDeviceServices(deviceId: DeviceId, services: ServiceMetadata[]): void;
+    /**
+     * Discover all services and characteristics for a device
+     */
+    discoverAllServicesAndCharacteristicsForDevice(deviceIdentifier: DeviceId): Promise<MockDevice>;
+    /**
+     * Get discovered services for a device
+     */
+    servicesForDevice(deviceIdentifier: DeviceId): Promise<Service[]>;
+    /**
+     * Get characteristics for a service
+     */
+    characteristicsForService(serviceUUID: UUID, deviceIdentifier: DeviceId): Promise<CharacteristicMetadata[]>;
     state(): Promise<State>;
     setState(newState: State): void;
     onStateChange(listener: StateChangeListener, emitCurrentState?: boolean): Subscription;

@@ -56,6 +56,33 @@ setTimeout(() => {
     bleManager.addMockDevice(heartMonitor);
     bleManager.addMockDevice(smartThermometer);
     
+    // Set up services and characteristics for heart monitor
+    bleManager.setDeviceServices('heart-monitor-123', [
+        {
+            uuid: '180D', // Heart Rate Service
+            characteristics: [
+                {
+                    uuid: '2A37', // Heart Rate Measurement
+                    isReadable: true,
+                    isNotifiable: true
+                },
+                {
+                    uuid: '2A38', // Body Sensor Location
+                    isReadable: true
+                }
+            ]
+        },
+        {
+            uuid: '180F', // Battery Service
+            characteristics: [
+                {
+                    uuid: '2A19', // Battery Level
+                    isReadable: true
+                }
+            ]
+        }
+    ]);
+    
     // Start scanning
     console.log('Starting device scan...');
     bleManager.startDeviceScan(
@@ -77,7 +104,37 @@ setTimeout(() => {
     }, 5000);
 }, 5000);
 
-// Example 3: Characteristic Monitoring
+// Example 3: Device Connection & Service Discovery
+setTimeout(async () => {
+    console.log('\n==== DEVICE CONNECTION & SERVICE DISCOVERY EXAMPLE ====');
+    
+    const deviceId = 'heart-monitor-123';
+    
+    // Connect to device
+    console.log(`Connecting to ${deviceId}...`);
+    try {
+        const connectedDevice = await bleManager.connectToDevice(deviceId);
+        console.log(`Connected to ${connectedDevice.name}`);
+        
+        // Discover services and characteristics
+        console.log('Discovering services and characteristics...');
+        await bleManager.discoverAllServicesAndCharacteristicsForDevice(deviceId);
+        console.log('Discovery complete');
+        
+        // Get discovered services
+        const services = await bleManager.servicesForDevice(deviceId);
+        console.log('Discovered services:', services.map(s => s.uuid));
+        
+        // Get characteristics for a service
+        const characteristics = await bleManager.characteristicsForService('180D', deviceId);
+        console.log('Characteristics for service 180D:', characteristics.map(c => c.uuid));
+        
+    } catch (error) {
+        console.error('Connection or discovery failed:', getErrorMessage(error));
+    }
+}, 11000);
+
+// Example 4: Characteristic Monitoring
 setTimeout( async () => {
     console.log('\n==== CHARACTERISTIC MONITORING EXAMPLE ====');
     
@@ -85,16 +142,6 @@ setTimeout( async () => {
     const serviceUUID = '180D'; // Heart Rate Service
     const characteristicUUID = '2A37'; // Heart Rate Measurement
     
-    // First connect to the device
-    console.log(`Connecting to ${deviceId}...`);
-    try {
-        await bleManager.connectToDevice(deviceId);
-        console.log('Device connected');
-    } catch (error) {
-        console.error('Connection failed:', getErrorMessage(error));
-        return;
-    }
-
     // Set initial characteristic value
     bleManager.setCharacteristicValueForReading(
         deviceId,
@@ -154,7 +201,7 @@ setTimeout( async () => {
     }, 8000);
 }, 11000);
 
-// Example 4: Characteristic Reading
+// Example 5: Characteristic Reading
 setTimeout(async () => {
     console.log('\n==== CHARACTERISTIC READING EXAMPLE ====');
     

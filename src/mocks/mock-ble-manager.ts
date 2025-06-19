@@ -38,6 +38,25 @@ export interface Characteristic {
     isNotifiable: boolean;
     isIndicatable: boolean;
 }
+export interface Service {
+    uuid: UUID;
+    deviceID: DeviceId;
+    // Add other properties as needed
+}
+
+export interface CharacteristicMetadata {
+    uuid: UUID;
+    isReadable?: boolean;
+    isWritableWithResponse?: boolean;
+    isWritableWithoutResponse?: boolean;
+    isNotifiable?: boolean;
+    // Add other properties as needed
+}
+
+export interface ServiceMetadata {
+    uuid: UUID;
+    characteristics: CharacteristicMetadata[];
+}
 
 type StateChangeListener = (state: State) => void;
 type Subscription = { remove: () => void };
@@ -81,6 +100,87 @@ export class MockBleManager {
     private connectionDelays: Map<DeviceId, number> = new Map();
     private connectionErrors: Map<DeviceId, Error> = new Map();
     private disconnectionErrors: Map<DeviceId, Error> = new Map();
+
+    // Service discovery
+    private deviceServicesMetadata: Map<DeviceId, ServiceMetadata[]> = new Map();
+    private discoveredServices: Map<DeviceId, Service[]> = new Map();
+
+    // ======================
+    // Service Discovery
+    // ======================
+
+    /**
+     * Set services and characteristics metadata for a device
+     */
+    setDeviceServices(
+        deviceId: DeviceId,
+        services: ServiceMetadata[]
+    ) {
+        this.deviceServicesMetadata.set(deviceId, services);
+    }
+
+    /**
+     * Discover all services and characteristics for a device
+     */
+    async discoverAllServicesAndCharacteristicsForDevice(
+        deviceIdentifier: DeviceId
+    ): Promise<MockDevice> {
+        // Ensure device is connected
+        if (!this.isDeviceConnected(deviceIdentifier)) {
+            throw new Error('Device not connected');
+        }
+
+        const device = this.discoveredDevices.get(deviceIdentifier);
+        if (!device) {
+            throw new Error('Device not found');
+        }
+
+        // Get services metadata
+        const servicesMetadata = this.deviceServicesMetadata.get(deviceIdentifier) || [];
+
+        // Create service objects
+        const services: Service[] = servicesMetadata.map(service => ({
+            uuid: service.uuid,
+            deviceID: deviceIdentifier
+        }));
+
+        // Store discovered services
+        this.discoveredServices.set(deviceIdentifier, services);
+
+        return device;
+    }
+
+    /**
+     * Get discovered services for a device
+     */
+    async servicesForDevice(
+        deviceIdentifier: DeviceId
+    ): Promise<Service[]> {
+        if (!this.discoveredServices.has(deviceIdentifier)) {
+            throw new Error('Services not discovered for device');
+        }
+
+        return this.discoveredServices.get(deviceIdentifier) || [];
+    }
+
+    /**
+     * Get characteristics for a service
+     */
+    async characteristicsForService(
+        serviceUUID: UUID,
+        deviceIdentifier: DeviceId
+    ): Promise<CharacteristicMetadata[]> {
+        const servicesMetadata = this.deviceServicesMetadata.get(deviceIdentifier) || [];
+        const service = servicesMetadata.find(s => s.uuid === serviceUUID);
+
+        if (!service) {
+            throw new Error(`Service ${serviceUUID} not found`);
+        }
+
+        return service.characteristics;
+    }
+
+
 
     // ======================
     // State Management
@@ -202,6 +302,8 @@ export class MockBleManager {
             this.disconnectionErrors.get(deviceIdentifier) || null,
             device
         );
+        // Clear discovered services
+        this.discoveredServices.delete(deviceIdentifier);
 
         return device;
     }
@@ -246,6 +348,9 @@ export class MockBleManager {
         if (this.connectedDevices.has(deviceIdentifier)) {
             this.connectedDevices.delete(deviceIdentifier);
 
+            // Clear discovered services
+            this.discoveredServices.delete(deviceIdentifier);
+            
             const device = this.discoveredDevices.get(deviceIdentifier);
             this.notifyConnectionListeners(
                 deviceIdentifier,
