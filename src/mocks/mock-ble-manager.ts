@@ -14,6 +14,11 @@ export interface ScanOptions {
     allowDuplicates?: boolean;
 }
 
+export interface ConnectionOptions {
+    autoConnect?: boolean;
+    requestMTU?: number;
+}
+
 export interface MockDevice {
     id: string;
     name: string | null;
@@ -22,6 +27,7 @@ export interface MockDevice {
     manufacturerData: string | null;
     serviceData: Record<string, string> | null;
     serviceUUIDs: string[] | null;
+    isConnectable?: boolean; // Added for connection simulation
 }
 
 export interface Characteristic {
@@ -38,6 +44,7 @@ type Subscription = { remove: () => void };
 type DeviceScanListener = (error: Error | null, device: MockDevice | null) => void;
 type CharacteristicListener = (error: Error | null, characteristic: Characteristic | null) => void;
 type MonitorSubscription = { remove: () => void };
+type ConnectionListener = (error: Error | null, device: MockDevice | null) => void;
 
 export class MockBleManager {
     // State management
@@ -67,6 +74,360 @@ export class MockBleManager {
     private writeWithResponseErrors: Map<string, Error> = new Map();
     private writeWithoutResponseErrors: Map<string, Error> = new Map();
     private writeListeners: Map<string, (value: string) => void> = new Map();
+
+    // Connection management
+    private connectedDevices: Set<DeviceId> = new Set();
+    private connectionListeners: Map<DeviceId, ConnectionListener[]> = new Map();
+    private connectionDelays: Map<DeviceId, number> = new Map();
+    private connectionErrors: Map<DeviceId, Error> = new Map();
+    private disconnectionErrors: Map<DeviceId, Error> = new Map();
+
+    // ======================
+    // State Management
+    // ======================
+    async state(): Promise<State> {
+        return this.currentState;
+    }
+
+    setState(newState: State) {
+        this.currentState = newState;
+        this.stateListeners.forEach(listener => listener(newState));
+
+        // Automatically stop scanning when not powered on
+        if (newState !== 'PoweredOn' && this.isScanning) {
+            this.stopDeviceScan();
+        }
+
+        // Disconnect all devices when Bluetooth is powered off
+        if (newState === 'PoweredOff') {
+            Array.from(this.connectedDevices).forEach(deviceId => {
+                this.simulateDeviceDisconnection(
+                    deviceId,
+                    new Error('Bluetooth powered off')
+                );
+            });
+        }
+    }
+
+    onStateChange(
+        listener: StateChangeListener,
+        emitCurrentState: boolean = false
+    ): Subscription {
+        this.stateListeners.push(listener);
+
+        if (emitCurrentState) {
+            setTimeout(() => listener(this.currentState), 0);
+        }
+
+        return {
+            remove: () => {
+                this.stateListeners = this.stateListeners.filter(l => l !== listener);
+            }
+        };
+    }
+
+    // ======================
+    // Connection Management
+    // ======================
+
+    /**
+     * Connect to a device
+     */
+    async connectToDevice(
+        deviceIdentifier: DeviceId,
+        options?: ConnectionOptions
+    ): Promise<MockDevice> {
+        // Ensure Bluetooth is on
+        if (this.currentState !== 'PoweredOn') {
+            throw new Error('Bluetooth is not powered on');
+        }
+
+        const device = this.discoveredDevices.get(deviceIdentifier);
+        if (!device) {
+            throw new Error(`Device ${deviceIdentifier} not found`);
+        }
+
+        if (device.isConnectable === false) {
+            throw new Error(`Device ${deviceIdentifier} is not connectable`);
+        }
+
+        // Check for simulated connection error
+        if (this.connectionErrors.has(deviceIdentifier)) {
+            const error = this.connectionErrors.get(deviceIdentifier)!;
+            throw error;
+        }
+
+        // Get connection delay
+        const delay = this.connectionDelays.get(deviceIdentifier) || 0;
+
+        // Simulate connection time
+        if (delay > 0) {
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
+
+        // Update MTU if requested
+        if (options?.requestMTU) {
+            device.mtu = options.requestMTU;
+        }
+
+        // Mark device as connected
+        this.connectedDevices.add(deviceIdentifier);
+
+        // Notify connection listeners
+        this.notifyConnectionListeners(deviceIdentifier, null, device);
+
+        return device;
+    }
+
+    /**
+     * Disconnect from a device
+     */
+    async cancelDeviceConnection(deviceIdentifier: DeviceId): Promise<MockDevice> {
+        const device = this.discoveredDevices.get(deviceIdentifier);
+        if (!device) {
+            throw new Error(`Device ${deviceIdentifier} not found`);
+        }
+
+        // Check if device is connected
+        if (!this.connectedDevices.has(deviceIdentifier)) {
+            throw new Error(`Device ${deviceIdentifier} is not connected`);
+        }
+
+        // Remove from connected devices
+        this.connectedDevices.delete(deviceIdentifier);
+
+        // Notify disconnection listeners
+        this.notifyConnectionListeners(
+            deviceIdentifier,
+            this.disconnectionErrors.get(deviceIdentifier) || null,
+            device
+        );
+
+        return device;
+    }
+
+    /**
+     * Check if a device is connected
+     */
+    isDeviceConnected(deviceIdentifier: DeviceId): boolean {
+        return this.connectedDevices.has(deviceIdentifier);
+    }
+
+    /**
+     * Listen for connection state changes
+     */
+    onDeviceDisconnected(
+        deviceIdentifier: DeviceId,
+        listener: ConnectionListener
+    ): Subscription {
+        if (!this.connectionListeners.has(deviceIdentifier)) {
+            this.connectionListeners.set(deviceIdentifier, []);
+        }
+
+        const listeners = this.connectionListeners.get(deviceIdentifier)!;
+        listeners.push(listener);
+
+        return {
+            remove: () => {
+                const updatedListeners = listeners.filter(l => l !== listener);
+                if (updatedListeners.length === 0) {
+                    this.connectionListeners.delete(deviceIdentifier);
+                } else {
+                    this.connectionListeners.set(deviceIdentifier, updatedListeners);
+                }
+            }
+        };
+    }
+
+    /**
+     * Simulate a device disconnection (e.g., out of range)
+     */
+    simulateDeviceDisconnection(deviceIdentifier: DeviceId, error?: Error) {
+        if (this.connectedDevices.has(deviceIdentifier)) {
+            this.connectedDevices.delete(deviceIdentifier);
+
+            const device = this.discoveredDevices.get(deviceIdentifier);
+            this.notifyConnectionListeners(
+                deviceIdentifier,
+                error || new Error('Simulated disconnection'),
+                device || null
+            );
+        }
+    }
+
+    /**
+     * Simulate a connection error
+     */
+    simulateConnectionError(deviceIdentifier: DeviceId, error: Error) {
+        this.connectionErrors.set(deviceIdentifier, error);
+    }
+
+    /**
+     * Clear connection error
+     */
+    clearConnectionError(deviceIdentifier: DeviceId) {
+        this.connectionErrors.delete(deviceIdentifier);
+    }
+
+    /**
+     * Simulate a disconnection error
+     */
+    simulateDisconnectionError(deviceIdentifier: DeviceId, error: Error) {
+        this.disconnectionErrors.set(deviceIdentifier, error);
+    }
+
+    /**
+     * Clear disconnection error
+     */
+    clearDisconnectionError(deviceIdentifier: DeviceId) {
+        this.disconnectionErrors.delete(deviceIdentifier);
+    }
+
+    /**
+     * Set connection delay
+     */
+    setConnectionDelay(deviceIdentifier: DeviceId, delayMs: number) {
+        this.connectionDelays.set(deviceIdentifier, delayMs);
+    }
+
+    /**
+     * Notify connection listeners
+     */
+    private notifyConnectionListeners(
+        deviceIdentifier: DeviceId,
+        error: Error | null,
+        device: MockDevice | null
+    ) {
+        const listeners = this.connectionListeners.get(deviceIdentifier) || [];
+        listeners.forEach(listener => listener(error, device));
+    }
+
+    // ======================
+    // Device Scanning
+    // ======================
+    addMockDevice(device: MockDevice) {
+        // Default to connectable if not specified
+        if (device.isConnectable === undefined) {
+            device.isConnectable = true;
+        }
+        this.discoveredDevices.set(device.id, device);
+    }
+
+    removeMockDevice(deviceId: string) {
+        this.discoveredDevices.delete(deviceId);
+    }
+
+    clearMockDevices() {
+        this.discoveredDevices.clear();
+    }
+    /**
+     * Update a mock device's properties
+     */
+    updateMockDevice(deviceId: string, updates: Partial<MockDevice>) {
+        const device = this.discoveredDevices.get(deviceId);
+        if (device) {
+            this.discoveredDevices.set(deviceId, { ...device, ...updates });
+        } else {
+            throw new Error(`Device ${deviceId} not found`);
+        }
+    }
+
+    startDeviceScan(
+        UUIDs: string[] | null,
+        options: ScanOptions | null,
+        listener: DeviceScanListener
+    ) {
+        if (this.isScanning) {
+            throw new Error('Scan already in progress');
+        }
+
+        this.isScanning = true;
+        this.scanListener = listener;
+        this.scanOptions = options || {};
+        this.scanUUIDs = UUIDs;
+
+        this.simulateDeviceDiscovery();
+    }
+
+    stopDeviceScan() {
+        this.isScanning = false;
+        this.scanListener = null;
+
+        if (this.scanInterval) {
+            clearInterval(this.scanInterval);
+            this.scanInterval = null;
+        }
+    }
+
+    private simulateDeviceDiscovery() {
+        // Get filtered devices
+        const devices = Array.from(this.discoveredDevices.values()).filter(device => {
+            if (!this.scanUUIDs || this.scanUUIDs.length === 0) return true;
+            return device.serviceUUIDs?.some(uuid => this.scanUUIDs?.includes(uuid));
+        });
+
+        // Send initial devices
+        devices.forEach(device => {
+            if (this.scanListener) {
+                this.scanListener(null, device);
+            }
+        });
+
+        // Simulate ongoing discovery
+        this.scanInterval = setInterval(() => {
+            if (!this.isScanning || !this.scanListener) return;
+
+            // Send random device (with duplicates allowed)
+            if (this.discoveredDevices.size > 0) {
+                const randomIndex = Math.floor(Math.random() * this.discoveredDevices.size);
+                const randomDevice = Array.from(this.discoveredDevices.values())[randomIndex];
+
+                if (this.scanOptions.allowDuplicates || Math.random() > 0.7) {
+                    this.scanListener(null, randomDevice);
+                }
+            }
+
+            // Simulate occasional errors
+            if (Math.random() > 0.9) {
+                this.scanListener(new Error('Simulated scan error'), null);
+            }
+        }, 800);
+    }
+
+    // ======================
+    // Characteristic Reading
+    // ======================
+    async readCharacteristicForDevice(
+        deviceIdentifier: DeviceId,
+        serviceUUID: UUID,
+        characteristicUUID: UUID,
+        transactionId: TransactionId = null
+    ): Promise<Characteristic> {
+        // Ensure device is connected
+        if (!this.isDeviceConnected(deviceIdentifier)) {
+            throw new Error(`Device ${deviceIdentifier} is not connected`);
+        }
+
+        const key = this.getCharacteristicKey(deviceIdentifier, serviceUUID, characteristicUUID);
+
+        // Check if we should simulate an error for this characteristic
+        if (this.readErrors.has(key)) {
+            const error = this.readErrors.get(key)!;
+            return this.simulateReadOperation(key, () => Promise.reject(error));
+        }
+
+        // Get the current value
+        const value = this.characteristicValues.get(key) || null;
+
+        return this.simulateReadOperation(key, () => Promise.resolve({
+            uuid: characteristicUUID,
+            serviceUUID,
+            deviceID: deviceIdentifier,
+            value,
+            isNotifiable: true,
+            isIndicatable: false
+        }));
+    }
 
     /**
      * Set mock characteristic value for reading
@@ -119,211 +480,78 @@ export class MockBleManager {
         this.readDelays.set(key, delayMs);
     }
 
-    // ... existing methods ...
-
-
     // ======================
-    // State Management
+    // Characteristic Writing
     // ======================
-    async state(): Promise<State> {
-        return this.currentState;
-    }
 
-    setState(newState: State) {
-        this.currentState = newState;
-        this.stateListeners.forEach(listener => listener(newState));
-
-        // Automatically stop scanning when not powered on
-        if (newState !== 'PoweredOn' && this.isScanning) {
-            this.stopDeviceScan();
-        }
-    }
-
-    onStateChange(
-        listener: StateChangeListener,
-        emitCurrentState: boolean = false
-    ): Subscription {
-        this.stateListeners.push(listener);
-
-        if (emitCurrentState) {
-            setTimeout(() => listener(this.currentState), 0);
-        }
-
-        return {
-            remove: () => {
-                this.stateListeners = this.stateListeners.filter(l => l !== listener);
-            }
-        };
-    }
-
-    // ======================
-    // Device Scanning
-    // ======================
-    addMockDevice(device: MockDevice) {
-        this.discoveredDevices.set(device.id, device);
-    }
-
-    removeMockDevice(deviceId: string) {
-        this.discoveredDevices.delete(deviceId);
-    }
-
-    clearMockDevices() {
-        this.discoveredDevices.clear();
-    }
-
-    startDeviceScan(
-        UUIDs: string[] | null,
-        options: ScanOptions | null,
-        listener: DeviceScanListener
-    ) {
-        if (this.isScanning) {
-            throw new Error('Scan already in progress');
-        }
-
-        this.isScanning = true;
-        this.scanListener = listener;
-        this.scanOptions = options || {};
-        this.scanUUIDs = UUIDs;
-
-        this.simulateDeviceDiscovery();
-    }
-
-    stopDeviceScan() {
-        this.isScanning = false;
-        this.scanListener = null;
-
-        if (this.scanInterval) {
-            clearInterval(this.scanInterval);
-            this.scanInterval = null;
-        }
-    }
-
-    // ======================
-    // Characteristic Reading
-    // ======================
-    async readCharacteristicForDevice(
+    // Write with response (acknowledged write)
+    async writeCharacteristicWithResponseForDevice(
         deviceIdentifier: DeviceId,
         serviceUUID: UUID,
         characteristicUUID: UUID,
+        base64Value: string,
         transactionId: TransactionId = null
     ): Promise<Characteristic> {
-        const key = this.getCharacteristicKey(deviceIdentifier, serviceUUID, characteristicUUID);
-
-        // Check if we should simulate an error for this characteristic
-        if (this.readErrors.has(key)) {
-            const error = this.readErrors.get(key)!;
-            return this.simulateReadOperation(key, () => Promise.reject(error));
+        // Ensure device is connected
+        if (!this.isDeviceConnected(deviceIdentifier)) {
+            throw new Error(`Device ${deviceIdentifier} is not connected`);
         }
 
-        // Get the current value
-        const value = this.characteristicValues.get(key) || null;
+        const key = this.getCharacteristicKey(deviceIdentifier, serviceUUID, characteristicUUID);
 
-        return this.simulateReadOperation(key, () => Promise.resolve({
+        // Check for simulated error
+        if (this.writeWithResponseErrors.has(key)) {
+            const error = this.writeWithResponseErrors.get(key)!;
+            return this.simulateWriteOperation(key, true, () => Promise.reject(error));
+        }
+
+        // Update the characteristic value
+        this.characteristicValues.set(key, base64Value);
+        this.notifyWriteListeners(key, base64Value);
+
+        return this.simulateWriteOperation(key, true, () => Promise.resolve({
             uuid: characteristicUUID,
             serviceUUID,
             deviceID: deviceIdentifier,
-            value,
+            value: base64Value,
             isNotifiable: true,
             isIndicatable: false
         }));
     }
-  // ======================
-  // Characteristic Writing
-  // ======================
 
-  // Write with response (acknowledged write)
-  async writeCharacteristicWithResponseForDevice(
-    deviceIdentifier: DeviceId,
-    serviceUUID: UUID,
-    characteristicUUID: UUID,
-    base64Value: string,
-    transactionId: TransactionId = null
-  ): Promise<Characteristic> {
-    const key = this.getCharacteristicKey(deviceIdentifier, serviceUUID, characteristicUUID);
-    
-    // Check for simulated error
-    if (this.writeWithResponseErrors.has(key)) {
-      const error = this.writeWithResponseErrors.get(key)!;
-      return this.simulateWriteOperation(key, true, () => Promise.reject(error));
-    }
+    // Write without response (unacknowledged write)
+    async writeCharacteristicWithoutResponseForDevice(
+        deviceIdentifier: DeviceId,
+        serviceUUID: UUID,
+        characteristicUUID: UUID,
+        base64Value: string,
+        transactionId: TransactionId = null
+    ): Promise<Characteristic> {
+        // Ensure device is connected
+        if (!this.isDeviceConnected(deviceIdentifier)) {
+            throw new Error(`Device ${deviceIdentifier} is not connected`);
+        }
 
-    // Update the characteristic value
-    this.characteristicValues.set(key, base64Value);
-    this.notifyWriteListeners(key, base64Value);
+        const key = this.getCharacteristicKey(deviceIdentifier, serviceUUID, characteristicUUID);
 
-    return this.simulateWriteOperation(key, true, () => Promise.resolve({
-      uuid: characteristicUUID,
-      serviceUUID,
-      deviceID: deviceIdentifier,
-      value: base64Value,
-      isNotifiable: true,
-      isIndicatable: false
-    }));
-  }
+        // Check for simulated error
+        if (this.writeWithoutResponseErrors.has(key)) {
+            const error = this.writeWithoutResponseErrors.get(key)!;
+            return this.simulateWriteOperation(key, false, () => Promise.reject(error));
+        }
 
-  // Write without response (unacknowledged write)
-  async writeCharacteristicWithoutResponseForDevice(
-    deviceIdentifier: DeviceId,
-    serviceUUID: UUID,
-    characteristicUUID: UUID,
-    base64Value: string,
-    transactionId: TransactionId = null
-  ): Promise<Characteristic> {
-    const key = this.getCharacteristicKey(deviceIdentifier, serviceUUID, characteristicUUID);
-    
-    // Check for simulated error
-    if (this.writeWithoutResponseErrors.has(key)) {
-      const error = this.writeWithoutResponseErrors.get(key)!;
-      return this.simulateWriteOperation(key, false, () => Promise.reject(error));
-    }
+        // Update the characteristic value
+        this.characteristicValues.set(key, base64Value);
+        this.notifyWriteListeners(key, base64Value);
 
-    // Update the characteristic value
-    this.characteristicValues.set(key, base64Value);
-    this.notifyWriteListeners(key, base64Value);
-
-    return this.simulateWriteOperation(key, false, () => Promise.resolve({
-      uuid: characteristicUUID,
-      serviceUUID,
-      deviceID: deviceIdentifier,
-      value: base64Value,
-      isNotifiable: true,
-      isIndicatable: false
-    }));
-  }
-
-    private simulateDeviceDiscovery() {
-        // Get filtered devices
-        const devices = Array.from(this.discoveredDevices.values()).filter(device => {
-            if (!this.scanUUIDs || this.scanUUIDs.length === 0) return true;
-            return device.serviceUUIDs?.some(uuid => this.scanUUIDs?.includes(uuid));
-        });
-
-        // Send initial devices
-        devices.forEach(device => {
-            if (this.scanListener) {
-                this.scanListener(null, device);
-            }
-        });
-
-        // Simulate ongoing discovery
-        this.scanInterval = setInterval(() => {
-            if (!this.isScanning || !this.scanListener) return;
-
-            // Send random device (with duplicates allowed)
-            if (this.discoveredDevices.size > 0) {
-                const randomIndex = Math.floor(Math.random() * this.discoveredDevices.size);
-                const randomDevice = Array.from(this.discoveredDevices.values())[randomIndex];
-
-                if (this.scanOptions.allowDuplicates || Math.random() > 0.7) {
-                    this.scanListener(null, randomDevice);
-                }
-            }
-
-            // Simulate occasional errors
-            if (Math.random() > 0.9) {
-                this.scanListener(new Error('Simulated scan error'), null);
-            }
-        }, 800);
+        return this.simulateWriteOperation(key, false, () => Promise.resolve({
+            uuid: characteristicUUID,
+            serviceUUID,
+            deviceID: deviceIdentifier,
+            value: base64Value,
+            isNotifiable: true,
+            isIndicatable: false
+        }));
     }
 
     // ======================
@@ -336,6 +564,11 @@ export class MockBleManager {
         listener: CharacteristicListener,
         transactionId: TransactionId = null
     ): MonitorSubscription {
+        // Ensure device is connected
+        if (!this.isDeviceConnected(deviceIdentifier)) {
+            throw new Error(`Device ${deviceIdentifier} is not connected`);
+        }
+
         const key = this.getCharacteristicKey(deviceIdentifier, serviceUUID, characteristicUUID);
 
         if (!this.monitoredCharacteristics.has(key)) {
@@ -476,117 +709,117 @@ export class MockBleManager {
 
         return operation();
     }
-  /**
-   * Simulate write operation with optional delay
-   */
-  private async simulateWriteOperation<T>(
-    key: string,
-    withResponse: boolean,
-    operation: () => Promise<T>
-  ): Promise<T> {
-    const delay = withResponse 
-      ? this.writeWithResponseDelays.get(key) || 0
-      : this.writeWithoutResponseDelays.get(key) || 0;
-    
-    if (delay > 0) {
-      await new Promise(resolve => setTimeout(resolve, delay));
+
+    /**
+     * Simulate write operation with optional delay
+     */
+    private async simulateWriteOperation<T>(
+        key: string,
+        withResponse: boolean,
+        operation: () => Promise<T>
+    ): Promise<T> {
+        const delay = withResponse
+            ? this.writeWithResponseDelays.get(key) || 0
+            : this.writeWithoutResponseDelays.get(key) || 0;
+
+        if (delay > 0) {
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
+
+        return operation();
     }
-    
-    return operation();
-  }
 
-  /**
-   * Register a listener for write operations
-   */
-  onCharacteristicWrite(
-    deviceIdentifier: DeviceId,
-    serviceUUID: UUID,
-    characteristicUUID: UUID,
-    listener: (value: string) => void
-  ): { remove: () => void } {
-    const key = this.getCharacteristicKey(deviceIdentifier, serviceUUID, characteristicUUID);
-    this.writeListeners.set(key, listener);
-    
-    return {
-      remove: () => this.writeListeners.delete(key)
-    };
-  }
+    /**
+     * Register a listener for write operations
+     */
+    onCharacteristicWrite(
+        deviceIdentifier: DeviceId,
+        serviceUUID: UUID,
+        characteristicUUID: UUID,
+        listener: (value: string) => void
+    ): { remove: () => void } {
+        const key = this.getCharacteristicKey(deviceIdentifier, serviceUUID, characteristicUUID);
+        this.writeListeners.set(key, listener);
 
-  /**
-   * Notify write listeners
-   */
-  private notifyWriteListeners(key: string, value: string) {
-    const listener = this.writeListeners.get(key);
-    if (listener) {
-      listener(value);
+        return {
+            remove: () => this.writeListeners.delete(key)
+        };
     }
-  }
 
-  /**
-   * Simulate write errors
-   */
-  simulateWriteWithResponseError(
-    deviceIdentifier: DeviceId,
-    serviceUUID: UUID,
-    characteristicUUID: UUID,
-    error: Error
-  ) {
-    const key = this.getCharacteristicKey(deviceIdentifier, serviceUUID, characteristicUUID);
-    this.writeWithResponseErrors.set(key, error);
-  }
+    /**
+     * Notify write listeners
+     */
+    private notifyWriteListeners(key: string, value: string) {
+        const listener = this.writeListeners.get(key);
+        if (listener) {
+            listener(value);
+        }
+    }
 
-  simulateWriteWithoutResponseError(
-    deviceIdentifier: DeviceId,
-    serviceUUID: UUID,
-    characteristicUUID: UUID,
-    error: Error
-  ) {
-    const key = this.getCharacteristicKey(deviceIdentifier, serviceUUID, characteristicUUID);
-    this.writeWithoutResponseErrors.set(key, error);
-  }
+    /**
+     * Simulate write errors
+     */
+    simulateWriteWithResponseError(
+        deviceIdentifier: DeviceId,
+        serviceUUID: UUID,
+        characteristicUUID: UUID,
+        error: Error
+    ) {
+        const key = this.getCharacteristicKey(deviceIdentifier, serviceUUID, characteristicUUID);
+        this.writeWithResponseErrors.set(key, error);
+    }
 
-  /**
-   * Clear write errors
-   */
-  clearWriteWithResponseError(
-    deviceIdentifier: DeviceId,
-    serviceUUID: UUID,
-    characteristicUUID: UUID
-  ) {
-    const key = this.getCharacteristicKey(deviceIdentifier, serviceUUID, characteristicUUID);
-    this.writeWithResponseErrors.delete(key);
-  }
+    simulateWriteWithoutResponseError(
+        deviceIdentifier: DeviceId,
+        serviceUUID: UUID,
+        characteristicUUID: UUID,
+        error: Error
+    ) {
+        const key = this.getCharacteristicKey(deviceIdentifier, serviceUUID, characteristicUUID);
+        this.writeWithoutResponseErrors.set(key, error);
+    }
 
-  clearWriteWithoutResponseError(
-    deviceIdentifier: DeviceId,
-    serviceUUID: UUID,
-    characteristicUUID: UUID
-  ) {
-    const key = this.getCharacteristicKey(deviceIdentifier, serviceUUID, characteristicUUID);
-    this.writeWithoutResponseErrors.delete(key);
-  }
+    /**
+     * Clear write errors
+     */
+    clearWriteWithResponseError(
+        deviceIdentifier: DeviceId,
+        serviceUUID: UUID,
+        characteristicUUID: UUID
+    ) {
+        const key = this.getCharacteristicKey(deviceIdentifier, serviceUUID, characteristicUUID);
+        this.writeWithResponseErrors.delete(key);
+    }
 
-  /**
-   * Set write delays
-   */
-  setWriteWithResponseDelay(
-    deviceIdentifier: DeviceId,
-    serviceUUID: UUID,
-    characteristicUUID: UUID,
-    delayMs: number
-  ) {
-    const key = this.getCharacteristicKey(deviceIdentifier, serviceUUID, characteristicUUID);
-    this.writeWithResponseDelays.set(key, delayMs);
-  }
+    clearWriteWithoutResponseError(
+        deviceIdentifier: DeviceId,
+        serviceUUID: UUID,
+        characteristicUUID: UUID
+    ) {
+        const key = this.getCharacteristicKey(deviceIdentifier, serviceUUID, characteristicUUID);
+        this.writeWithoutResponseErrors.delete(key);
+    }
 
-  setWriteWithoutResponseDelay(
-    deviceIdentifier: DeviceId,
-    serviceUUID: UUID,
-    characteristicUUID: UUID,
-    delayMs: number
-  ) {
-    const key = this.getCharacteristicKey(deviceIdentifier, serviceUUID, characteristicUUID);
-    this.writeWithoutResponseDelays.set(key, delayMs);
-  }
+    /**
+     * Set write delays
+     */
+    setWriteWithResponseDelay(
+        deviceIdentifier: DeviceId,
+        serviceUUID: UUID,
+        characteristicUUID: UUID,
+        delayMs: number
+    ) {
+        const key = this.getCharacteristicKey(deviceIdentifier, serviceUUID, characteristicUUID);
+        this.writeWithResponseDelays.set(key, delayMs);
+    }
 
+    setWriteWithoutResponseDelay(
+        deviceIdentifier: DeviceId,
+        serviceUUID: UUID,
+        characteristicUUID: UUID,
+        delayMs: number
+    ) {
+        const key = this.getCharacteristicKey(deviceIdentifier, serviceUUID, characteristicUUID);
+        this.writeWithoutResponseDelays.set(key, delayMs);
+    }
 }

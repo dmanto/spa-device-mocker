@@ -5,6 +5,10 @@ export type TransactionId = string | null;
 export interface ScanOptions {
     allowDuplicates?: boolean;
 }
+export interface ConnectionOptions {
+    autoConnect?: boolean;
+    requestMTU?: number;
+}
 export interface MockDevice {
     id: string;
     name: string | null;
@@ -13,6 +17,7 @@ export interface MockDevice {
     manufacturerData: string | null;
     serviceData: Record<string, string> | null;
     serviceUUIDs: string[] | null;
+    isConnectable?: boolean;
 }
 export interface Characteristic {
     uuid: UUID;
@@ -31,6 +36,7 @@ type CharacteristicListener = (error: Error | null, characteristic: Characterist
 type MonitorSubscription = {
     remove: () => void;
 };
+type ConnectionListener = (error: Error | null, device: MockDevice | null) => void;
 export declare class MockBleManager {
     private currentState;
     private stateListeners;
@@ -50,6 +56,69 @@ export declare class MockBleManager {
     private writeWithResponseErrors;
     private writeWithoutResponseErrors;
     private writeListeners;
+    private connectedDevices;
+    private connectionListeners;
+    private connectionDelays;
+    private connectionErrors;
+    private disconnectionErrors;
+    state(): Promise<State>;
+    setState(newState: State): void;
+    onStateChange(listener: StateChangeListener, emitCurrentState?: boolean): Subscription;
+    /**
+     * Connect to a device
+     */
+    connectToDevice(deviceIdentifier: DeviceId, options?: ConnectionOptions): Promise<MockDevice>;
+    /**
+     * Disconnect from a device
+     */
+    cancelDeviceConnection(deviceIdentifier: DeviceId): Promise<MockDevice>;
+    /**
+     * Check if a device is connected
+     */
+    isDeviceConnected(deviceIdentifier: DeviceId): boolean;
+    /**
+     * Listen for connection state changes
+     */
+    onDeviceDisconnected(deviceIdentifier: DeviceId, listener: ConnectionListener): Subscription;
+    /**
+     * Simulate a device disconnection (e.g., out of range)
+     */
+    simulateDeviceDisconnection(deviceIdentifier: DeviceId, error?: Error): void;
+    /**
+     * Simulate a connection error
+     */
+    simulateConnectionError(deviceIdentifier: DeviceId, error: Error): void;
+    /**
+     * Clear connection error
+     */
+    clearConnectionError(deviceIdentifier: DeviceId): void;
+    /**
+     * Simulate a disconnection error
+     */
+    simulateDisconnectionError(deviceIdentifier: DeviceId, error: Error): void;
+    /**
+     * Clear disconnection error
+     */
+    clearDisconnectionError(deviceIdentifier: DeviceId): void;
+    /**
+     * Set connection delay
+     */
+    setConnectionDelay(deviceIdentifier: DeviceId, delayMs: number): void;
+    /**
+     * Notify connection listeners
+     */
+    private notifyConnectionListeners;
+    addMockDevice(device: MockDevice): void;
+    removeMockDevice(deviceId: string): void;
+    clearMockDevices(): void;
+    /**
+     * Update a mock device's properties
+     */
+    updateMockDevice(deviceId: string, updates: Partial<MockDevice>): void;
+    startDeviceScan(UUIDs: string[] | null, options: ScanOptions | null, listener: DeviceScanListener): void;
+    stopDeviceScan(): void;
+    private simulateDeviceDiscovery;
+    readCharacteristicForDevice(deviceIdentifier: DeviceId, serviceUUID: UUID, characteristicUUID: UUID, transactionId?: TransactionId): Promise<Characteristic>;
     /**
      * Set mock characteristic value for reading
      */
@@ -66,18 +135,8 @@ export declare class MockBleManager {
      * Set read delay for a characteristic (ms)
      */
     setCharacteristicReadDelay(deviceIdentifier: DeviceId, serviceUUID: UUID, characteristicUUID: UUID, delayMs: number): void;
-    state(): Promise<State>;
-    setState(newState: State): void;
-    onStateChange(listener: StateChangeListener, emitCurrentState?: boolean): Subscription;
-    addMockDevice(device: MockDevice): void;
-    removeMockDevice(deviceId: string): void;
-    clearMockDevices(): void;
-    startDeviceScan(UUIDs: string[] | null, options: ScanOptions | null, listener: DeviceScanListener): void;
-    stopDeviceScan(): void;
-    readCharacteristicForDevice(deviceIdentifier: DeviceId, serviceUUID: UUID, characteristicUUID: UUID, transactionId?: TransactionId): Promise<Characteristic>;
     writeCharacteristicWithResponseForDevice(deviceIdentifier: DeviceId, serviceUUID: UUID, characteristicUUID: UUID, base64Value: string, transactionId?: TransactionId): Promise<Characteristic>;
     writeCharacteristicWithoutResponseForDevice(deviceIdentifier: DeviceId, serviceUUID: UUID, characteristicUUID: UUID, base64Value: string, transactionId?: TransactionId): Promise<Characteristic>;
-    private simulateDeviceDiscovery;
     monitorCharacteristicForDevice(deviceIdentifier: DeviceId, serviceUUID: UUID, characteristicUUID: UUID, listener: CharacteristicListener, transactionId?: TransactionId): MonitorSubscription;
     setCharacteristicValue(deviceIdentifier: DeviceId, serviceUUID: UUID, characteristicUUID: UUID, value: string, options?: {
         notify: boolean;
