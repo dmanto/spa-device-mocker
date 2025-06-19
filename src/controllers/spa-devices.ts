@@ -1,11 +1,12 @@
 import type { MojoContext } from '@mojojs/core';
 import { WebSocketMessage, ControlCommand } from '../types';
+import { SpaDevice } from '../spa-device';
 
 export default class SpaDevicesController {
     async index(ctx: MojoContext): Promise<void> {
         ctx.stash.spaDevices = ctx.models.spaDevices.all();
         if (ctx.stash.ext === 'json') {
-            await ctx.render({json: ctx.stash.spaDevices});
+            await ctx.render({ json: ctx.stash.spaDevices });
         } else {
             await ctx.render();
         }
@@ -14,7 +15,7 @@ export default class SpaDevicesController {
     async remove(ctx: MojoContext): Promise<void> {
         ctx.models.spaDevices.remove(ctx.stash.mac);
         if (ctx.stash.ext === 'json') {
-            await ctx.render({json: {removed: true}});
+            await ctx.render({ json: { removed: true } });
         } else {
             await ctx.redirectTo('spa_devices');
         }
@@ -23,7 +24,7 @@ export default class SpaDevicesController {
     async show(ctx: MojoContext): Promise<void> {
         ctx.stash.spaDevice = ctx.models.spaDevices.find(ctx.stash.mac);
         if (ctx.stash.ext === 'json') {
-            await ctx.render({json: ctx.stash.spaDevice});
+            await ctx.render({ json: ctx.stash.spaDevice });
         } else {
             await ctx.render();
         }
@@ -36,9 +37,9 @@ export default class SpaDevicesController {
 
         if (_validate(ctx, spaDevice) === false) {
             if (ctx.stash.ext === 'json') {
-                await ctx.render({json: {error: 'Validation failed'}, status: 400});
+                await ctx.render({ json: { error: 'Validation failed' }, status: 400 });
             } else {
-                return ctx.render({view: 'spa-devices/create'}, {spaDevice});
+                return ctx.render({ view: 'spa-devices/create' }, { spaDevice });
             }
             return;
         }
@@ -46,9 +47,9 @@ export default class SpaDevicesController {
         const { mac } = spaDevice;
         ctx.models.spaDevices.add(spaDevice);
         if (ctx.stash.ext === 'json') {
-            await ctx.render({json: spaDevice, status: 201});
+            await ctx.render({ json: spaDevice, status: 201 });
         } else {
-            await ctx.redirectTo('show_spa_device', {values: {mac}});
+            await ctx.redirectTo('show_spa_device', { values: { mac } });
         }
     }
 
@@ -59,9 +60,9 @@ export default class SpaDevicesController {
 
         if (_validate(ctx, spaDevice) === false) {
             if (ctx.stash.ext === 'json') {
-                await ctx.render({json: {error: 'Validation failed'}, status: 400});
+                await ctx.render({ json: { error: 'Validation failed' }, status: 400 });
             } else {
-                return ctx.render({view: 'spa-devices/edit'}, {spaDevice});
+                return ctx.render({ view: 'spa-devices/edit' }, { spaDevice });
             }
             return;
         }
@@ -69,204 +70,204 @@ export default class SpaDevicesController {
         const mac = ctx.stash.mac;
         ctx.models.spaDevices.save(spaDevice);
         if (ctx.stash.ext === 'json') {
-            await ctx.render({json: spaDevice});
+            await ctx.render({ json: spaDevice });
         } else {
-            await ctx.redirectTo('show_spa_device', {values: {mac}});
+            await ctx.redirectTo('show_spa_device', { values: { mac } });
         }
     }
 }
 
-    function _validate(ctx: MojoContext, spaDevice: any): boolean {
-        const validate = ctx.schema({
-            $id: 'spaDeviceForm',
-            type: 'object',
-            properties: {
-                mac: { type: 'string', minLength: 1 },
-                area: { type: 'string' },
-                rssi: { type: 'number' }
-            },
-            required: ['mac']
-        });
-        return validate(spaDevice).isValid;
-    }
+function _validate(ctx: MojoContext, spaDevice: any): boolean {
+    const validate = ctx.schema({
+        $id: 'spaDeviceForm',
+        type: 'object',
+        properties: {
+            mac: { type: 'string', minLength: 1 },
+            area: { type: 'string' },
+            rssi: { type: 'number' }
+        },
+        required: ['mac']
+    });
+    return validate(spaDevice).isValid;
 }
 
 
-// MockBLEServer.ts
-import { Server } from '@mojojs/core';
-import { SpaDevice } from '../spa-device';
 
-export class MockBLEServer {
-    private devices: Map<string, SpaDevice> = new Map();
-    private server: Server;
-    private port: number;
+// // MockBLEServer.ts
+// import { Server } from '@mojojs/core';
+// import { SpaDevice } from '../spa-device';
 
-    constructor(port: number = 3001) {
-        this.port = port;
-        this.server = new Server();
-        this.setupRoutes();
-    }
+// export class MockBLEServer {
+//     private devices: Map<string, SpaDevice> = new Map();
+//     private server: Server;
+//     private port: number;
 
-    addDevice(device: SpaDevice): void {
-        this.devices.set(device.mac, device);
-    }
+//     constructor(port: number = 3001) {
+//         this.port = port;
+//         this.server = new Server();
+//         this.setupRoutes();
+//     }
 
-    async start(): Promise<void> {
-        await this.server.start({ port: this.port });
-        console.log(`Mock BLE Server running on port ${this.port}`);
-    }
+//     addDevice(device: SpaDevice): void {
+//         this.devices.set(device.mac, device);
+//     }
 
-    async stop(): Promise<void> {
-        await this.server.stop();
-    }
+//     async start(): Promise<void> {
+//         await this.server.start({ port: this.port });
+//         console.log(`Mock BLE Server running on port ${this.port}`);
+//     }
 
-    private setupRoutes(): void {
-        const router = this.server.router;
+//     async stop(): Promise<void> {
+//         await this.server.stop();
+//     }
 
-        // Create a new device
-        router.post('/devices', async ctx => {
-            const { mac, area, rssi } = await ctx.req.json();
-            if (!mac) {
-                return ctx.res.status(400).json({ error: 'MAC address is required' });
-            }
+//     private setupRoutes(): void {
+//         const router = this.server.router;
 
-            const device = new SpaDevice(mac, area, rssi);
-            this.devices.set(mac, device);
-            ctx.res.status(201).json({ message: `Device ${mac} created` });
-        });
+//         // Create a new device
+//         router.post('/devices', async ctx => {
+//             const { mac, area, rssi } = await ctx.req.json();
+//             if (!mac) {
+//                 return ctx.res.status(400).json({ error: 'MAC address is required' });
+//             }
 
-        // Get all devices
-        router.get('/devices', async ctx => {
-            const devices = Array.from(this.devices.values()).map(d => ({
-                mac: d.mac,
-                area: d.area,
-                rssi: d.rssi,
-                state: d.state
-            }));
-            ctx.res.json(devices);
-        });
+//             const device = new SpaDevice(mac, area, rssi);
+//             this.devices.set(mac, device);
+//             ctx.res.status(201).json({ message: `Device ${mac} created` });
+//         });
 
-        // Send command to device
-        router.post('/devices/:mac/command', async ctx => {
-            const mac = ctx.req.params.get('mac');
-            const command: ControlCommand = await ctx.req.json();
+//         // Get all devices
+//         router.get('/devices', async ctx => {
+//             const devices = Array.from(this.devices.values()).map(d => ({
+//                 mac: d.mac,
+//                 area: d.area,
+//                 rssi: d.rssi,
+//                 state: d.state
+//             }));
+//             ctx.res.json(devices);
+//         });
 
-            if (!this.devices.has(mac)) {
-                return ctx.res.status(404).json({ error: 'Device not found' });
-            }
+//         // Send command to device
+//         router.post('/devices/:mac/command', async ctx => {
+//             const mac = ctx.req.params.get('mac');
+//             const command: ControlCommand = await ctx.req.json();
 
-            const device = this.devices.get(mac)!;
+//             if (!this.devices.has(mac)) {
+//                 return ctx.res.status(404).json({ error: 'Device not found' });
+//             }
 
-            try {
-                // Handle connection commands
-                if (command.characteristic === 'CONNECT') {
-                    device.connect();
-                } else if (command.characteristic === 'DISCONNECT') {
-                    device.disconnect();
-                }
-                // Handle characteristic writes
-                else {
-                    device.handleWrite(command.characteristic, command.value);
-                }
+//             const device = this.devices.get(mac)!;
 
-                ctx.res.json({ message: 'Command executed' });
-            } catch (error) {
-                ctx.res.status(400).json({ error: 'Invalid command' });
-            }
-        });
+//             try {
+//                 // Handle connection commands
+//                 if (command.characteristic === 'CONNECT') {
+//                     device.connect();
+//                 } else if (command.characteristic === 'DISCONNECT') {
+//                     device.disconnect();
+//                 }
+//                 // Handle characteristic writes
+//                 else {
+//                     device.handleWrite(command.characteristic, command.value);
+//                 }
 
-        // Reset device
-        router.post('/devices/:mac/reset', async ctx => {
-            const mac = ctx.req.params.get('mac');
+//                 ctx.res.json({ message: 'Command executed' });
+//             } catch (error) {
+//                 ctx.res.status(400).json({ error: 'Invalid command' });
+//             }
+//         });
 
-            if (!this.devices.has(mac)) {
-                return ctx.res.status(404).json({ error: 'Device not found' });
-            }
+//         // Reset device
+//         router.post('/devices/:mac/reset', async ctx => {
+//             const mac = ctx.req.params.get('mac');
 
-            const device = this.devices.get(mac)!;
-            const { area, rssi } = device;
-            this.devices.set(mac, new SpaDevice(mac, area, rssi));
-            ctx.res.json({ message: 'Device reset' });
-        });
+//             if (!this.devices.has(mac)) {
+//                 return ctx.res.status(404).json({ error: 'Device not found' });
+//             }
 
-        // WebSocket endpoint
-        router.websocket('/ws', async ctx => {
-            const ws = await ctx.ws();
-            console.log('WebSocket client connected');
+//             const device = this.devices.get(mac)!;
+//             const { area, rssi } = device;
+//             this.devices.set(mac, new SpaDevice(mac, area, rssi));
+//             ctx.res.json({ message: 'Device reset' });
+//         });
 
-            // Send initial state
-            const devices = Array.from(this.devices.values()).map(d => ({
-                mac: d.mac,
-                area: d.area,
-                rssi: d.rssi,
-                state: d.state
-            }));
+//         // WebSocket endpoint
+//         router.websocket('/ws', async ctx => {
+//             const ws = await ctx.ws();
+//             console.log('WebSocket client connected');
 
-            ws.send(JSON.stringify({
-                event: 'initial_state',
-                devices,
-                timestamp: Date.now()
-            }));
+//             // Send initial state
+//             const devices = Array.from(this.devices.values()).map(d => ({
+//                 mac: d.mac,
+//                 area: d.area,
+//                 rssi: d.rssi,
+//                 state: d.state
+//             }));
 
-            // Handle messages
-            ws.on('message', (data) => {
-                try {
-                    const message: WebSocketMessage = JSON.parse(data.toString());
-                    this.handleWebSocketMessage(message, ws);
-                } catch (error) {
-                    console.error('Invalid WebSocket message:', error);
-                }
-            });
+//             ws.send(JSON.stringify({
+//                 event: 'initial_state',
+//                 devices,
+//                 timestamp: Date.now()
+//             }));
 
-            ws.on('close', () => {
-                console.log('WebSocket client disconnected');
-            });
-        });
-    }
+//             // Handle messages
+//             ws.on('message', (data) => {
+//                 try {
+//                     const message: WebSocketMessage = JSON.parse(data.toString());
+//                     this.handleWebSocketMessage(message, ws);
+//                 } catch (error) {
+//                     console.error('Invalid WebSocket message:', error);
+//                 }
+//             });
 
-    private handleWebSocketMessage(message: WebSocketMessage, ws: WebSocket): void {
-        if (message.event === 'command') {
-            if (!message.device || !message.characteristic || message.value === undefined) {
-                console.warn('Invalid command message');
-                return;
-            }
+//             ws.on('close', () => {
+//                 console.log('WebSocket client disconnected');
+//             });
+//         });
+//     }
 
-            const device = this.devices.get(message.device);
-            if (!device) {
-                console.warn(`Device not found: ${message.device}`);
-                return;
-            }
+//     private handleWebSocketMessage(message: WebSocketMessage, ws: WebSocket): void {
+//         if (message.event === 'command') {
+//             if (!message.device || !message.characteristic || message.value === undefined) {
+//                 console.warn('Invalid command message');
+//                 return;
+//             }
 
-            // Handle connection commands
-            if (message.characteristic === 'CONNECT') {
-                device.connect();
-            } else if (message.characteristic === 'DISCONNECT') {
-                device.disconnect();
-            }
-            // Handle characteristic writes
-            else {
-                device.handleWrite(message.characteristic, message.value);
-            }
+//             const device = this.devices.get(message.device);
+//             if (!device) {
+//                 console.warn(`Device not found: ${message.device}`);
+//                 return;
+//             }
 
-            // Broadcast state change
-            this.broadcastStateChange(device, message.characteristic);
-        }
-    }
+//             // Handle connection commands
+//             if (message.characteristic === 'CONNECT') {
+//                 device.connect();
+//             } else if (message.characteristic === 'DISCONNECT') {
+//                 device.disconnect();
+//             }
+//             // Handle characteristic writes
+//             else {
+//                 device.handleWrite(message.characteristic, message.value);
+//             }
 
-    // Broadcast state changes to all WebSocket clients
-    broadcastStateChange(device: SpaDevice, characteristic: Characteristic): void {
-        const message: WebSocketMessage = {
-            event: 'state_change',
-            device: device.mac,
-            characteristic,
-            value: device.state.characteristics[characteristic],
-            timestamp: Date.now()
-        };
+//             // Broadcast state change
+//             this.broadcastStateChange(device, message.characteristic);
+//         }
+//     }
 
-        this.server.clients.forEach(client => {
-            if (client.readyState === WebSocket.OPEN) {
-                client.send(JSON.stringify(message));
-            }
-        });
-    }
-}
+//     // Broadcast state changes to all WebSocket clients
+//     broadcastStateChange(device: SpaDevice, characteristic: Characteristic): void {
+//         const message: WebSocketMessage = {
+//             event: 'state_change',
+//             device: device.mac,
+//             characteristic,
+//             value: device.state.characteristics[characteristic],
+//             timestamp: Date.now()
+//         };
+
+//         this.server.clients.forEach(client => {
+//             if (client.readyState === WebSocket.OPEN) {
+//                 client.send(JSON.stringify(message));
+//             }
+//         });
+//     }
+// }
