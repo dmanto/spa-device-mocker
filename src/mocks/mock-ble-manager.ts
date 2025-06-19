@@ -60,6 +60,14 @@ export interface ServiceMetadata {
 export interface MtuChangedListener {
     (mtu: number): void;
 }
+export interface RestoredState {
+    connectedPeripherals: MockDevice[];
+}
+
+export interface BleManagerOptions {
+    restoreStateIdentifier?: string;
+    restoreStateFunction?: (restoredState: RestoredState | null) => void;
+}
 
 type StateChangeListener = (state: State) => void;
 type Subscription = { remove: () => void };
@@ -67,6 +75,9 @@ type DeviceScanListener = (error: Error | null, device: MockDevice | null) => vo
 type CharacteristicListener = (error: Error | null, characteristic: Characteristic | null) => void;
 type MonitorSubscription = { remove: () => void };
 type ConnectionListener = (error: Error | null, device: MockDevice | null) => void;
+
+// Static store for restored state
+const restoredStateStore: Map<string, RestoredState> = new Map();
 
 export class MockBleManager {
     // State management
@@ -103,6 +114,41 @@ export class MockBleManager {
     private connectionDelays: Map<DeviceId, number> = new Map();
     private connectionErrors: Map<DeviceId, Error> = new Map();
     private disconnectionErrors: Map<DeviceId, Error> = new Map();
+
+    // Background mode
+    private restoreStateIdentifier?: string;
+    private restoreStateFunction?: (restoredState: RestoredState | null) => void;
+
+    constructor(options?: BleManagerOptions) {
+        if (options) {
+            this.restoreStateIdentifier = options.restoreStateIdentifier;
+            this.restoreStateFunction = options.restoreStateFunction;
+            
+            if (this.restoreStateIdentifier && this.restoreStateFunction) {
+                // Simulate iOS state restoration
+                setTimeout(() => {
+                    const restoredState = restoredStateStore.get(this.restoreStateIdentifier!);
+                    this.restoreStateFunction!(restoredState || null);
+                }, 100);
+            }
+        }
+    }
+
+    /**
+     * Simulate iOS state restoration by saving connected devices
+     */
+    private saveRestorationState() {
+        if (!this.restoreStateIdentifier) return;
+        
+        const connectedDevices = Array.from(this.connectedDevices).map(id => {
+            const device = this.discoveredDevices.get(id);
+            return { ...device! }; // Return a copy
+        });
+        
+        restoredStateStore.set(this.restoreStateIdentifier, {
+            connectedPeripherals: connectedDevices
+        });
+    }
 
     // MTU management
     private mtuListeners: Map<DeviceId, MtuChangedListener[]> = new Map();
@@ -370,6 +416,9 @@ export class MockBleManager {
         // Notify connection listeners
         this.notifyConnectionListeners(deviceIdentifier, null, device);
 
+        // Save restoration state
+        this.saveRestorationState();
+
         return device;
     }
 
@@ -398,6 +447,9 @@ export class MockBleManager {
         );
         // Clear discovered services
         this.discoveredServices.delete(deviceIdentifier);
+
+        // Save restoration state
+        this.saveRestorationState();
 
         return device;
     }

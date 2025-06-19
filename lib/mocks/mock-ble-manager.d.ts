@@ -45,6 +45,13 @@ export interface ServiceMetadata {
 export interface MtuChangedListener {
     (mtu: number): void;
 }
+export interface RestoredState {
+    connectedPeripherals: MockDevice[];
+}
+export interface BleManagerOptions {
+    restoreStateIdentifier?: string;
+    restoreStateFunction?: (restoredState: RestoredState | null) => void;
+}
 type StateChangeListener = (state: State) => void;
 type Subscription = {
     remove: () => void;
@@ -79,6 +86,13 @@ export declare class MockBleManager {
     private connectionDelays;
     private connectionErrors;
     private disconnectionErrors;
+    private restoreStateIdentifier?;
+    private restoreStateFunction?;
+    constructor(options?: BleManagerOptions);
+    /**
+     * Simulate iOS state restoration by saving connected devices
+     */
+    private saveRestorationState;
     private mtuListeners;
     private deviceMaxMTUs;
     /**

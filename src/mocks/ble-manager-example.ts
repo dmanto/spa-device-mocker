@@ -472,3 +472,37 @@ setTimeout(async () => {
     // Clean up
     mtuSubscription.remove();
 }, 35000);
+
+// Example 8: Background Mode & State Restoration
+setTimeout(() => {
+    console.log('\n==== BACKGROUND MODE EXAMPLE ====');
+    
+    // Create a new manager with state restoration
+    const restoredManager = new MockBleManager({
+        restoreStateIdentifier: 'test-restoration',
+        restoreStateFunction: (state) => {
+            if (state) {
+                console.log('State restored with connected devices:', 
+                    state.connectedPeripherals.map(d => d.name));
+            } else {
+                console.log('No state to restore');
+            }
+        }
+    });
+    
+    // Simulate app restart
+    setTimeout(() => {
+        console.log('Simulating app restart...');
+        const newManager = new MockBleManager({
+            restoreStateIdentifier: 'test-restoration',
+            restoreStateFunction: (state) => {
+                if (state) {
+                    console.log('After restart - restored devices:', 
+                        state.connectedPeripherals.map(d => d.name));
+                } else {
+                    console.log('After restart - no state found');
+                }
+            }
+        });
+    }, 2000);
+}, 39000);
